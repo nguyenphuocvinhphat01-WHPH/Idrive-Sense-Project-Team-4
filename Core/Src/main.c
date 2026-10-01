@@ -17,6 +17,21 @@
 #include <string.h>
 /* USER CODE END Includes */
 
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
@@ -38,7 +53,7 @@ uint16_t wiperDelay = 1000;
 bool wiperDirection = false;
 
 // ===================================================
-// 2. Biến cho Nhiệt độ độ ẩm (DHT11) - Đã dời sang PA5
+// 2. Biến cho Nhiệt độ độ ẩm (DHT11) - Chân PA5
 // ===================================================
 uint8_t Rh_byte1, Rh_byte2, Temp_byte1, Temp_byte2;
 uint16_t SUM;
@@ -50,8 +65,8 @@ uint8_t Humidity = 0;
 // 3. Biến cho Khí thải MQ-135
 // ===================================================
 uint32_t mq135_adc_value;
-#define THRESHOLD_ON 250   // Bật báo động
-#define THRESHOLD_OFF 400  // Tắt báo động
+#define MQ135_SAFE_LEVEL   600   // Trên 600: An toàn
+#define MQ135_DANGER_LEVEL 450   // Dưới 450: Thổi CO2 vào -> Báo động
 #define ADC_FILTER_SIZE 10
 
 uint32_t adc_buffer[ADC_FILTER_SIZE];
@@ -66,8 +81,8 @@ uint32_t buzzer_timer = 0;
 // 4. Biến cho Ánh sáng LDR
 // ===================================================
 uint32_t ldr_adc_value;
-#define LDR_THRESHOLD_ON 3000   // Tối -> Bật đèn
-#define LDR_THRESHOLD_OFF 2300  // Sáng -> Tắt đèn
+#define LDR_THRESHOLD_ON  3000   // Vượt 3000 -> Bật đèn
+#define LDR_THRESHOLD_OFF 2800   // Dưới 2800 -> Tắt đèn (tránh dao động)
 uint8_t led_state = 0;
 
 /* USER CODE END PV */
@@ -76,17 +91,17 @@ uint8_t led_state = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_TIM4_Init(void);
-static void MX_TIM12_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
+static void MX_TIM12_Init(void);
 static void MX_USART1_UART_Init(void);
-
 /* USER CODE BEGIN PFP */
 uint32_t Read_ADC_Channel(uint32_t channel);
 uint32_t Read_ADC_Filtered(uint32_t channel);
 /* USER CODE END PFP */
 
+/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 int _write(int file, char *ptr, int len) {
     HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, HAL_MAX_DELAY);
@@ -113,7 +128,7 @@ uint32_t Read_ADC_Channel(uint32_t channel) {
     return value;
 }
 
-// Bộ lọc trung bình tĩnh cho cảm biến khí MQ-135
+// Bộ lọc trung bình động cho cảm biến khí MQ-135
 uint32_t Read_ADC_Filtered(uint32_t channel) {
     uint32_t raw = Read_ADC_Channel(channel);
     adc_sum -= adc_buffer[adc_index];
@@ -141,7 +156,7 @@ void Set_Servo_Angle(TIM_HandleTypeDef *htim, uint32_t Channel, uint8_t angle) {
 }
 
 // -----------------------------------------------------------
-// HÀM GIAO TIẾP DHT11 (Lưu ý: Đã đổi sang chân PA5)
+// HÀM GIAO TIẾP DHT11 (Chân PA5)
 // -----------------------------------------------------------
 void Set_Pin_Output(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -161,15 +176,15 @@ void Set_Pin_Input(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
 
 uint8_t DHT11_Check_Response(void) {
     uint16_t timeout = 0;
-    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) { // Đã đổi PA5
+    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) {
         timeout++; delay_us(1); if (timeout > 100) return 0;
     }
     timeout = 0;
-    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET) { // Đã đổi PA5
+    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET) {
         timeout++; delay_us(1); if (timeout > 100) return 0;
     }
     timeout = 0;
-    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) { // Đã đổi PA5
+    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) {
         timeout++; delay_us(1); if (timeout > 100) return 0;
     }
     return 1;
@@ -180,14 +195,14 @@ uint8_t DHT11_Read_Byte(void) {
     uint16_t timeout = 0;
     for (j = 0; j < 8; j++) {
         timeout = 0;
-        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET) { // Đã đổi PA5
+        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET) {
             timeout++; delay_us(1); if (timeout > 100) return 0;
         }
         delay_us(35);
-        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) { // Đã đổi PA5
+        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) {
             i |= (1 << (7 - j));
             timeout = 0;
-            while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) { // Đã đổi PA5
+            while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_SET) {
                 timeout++; delay_us(1); if (timeout > 100) break;
             }
         } else {
@@ -198,15 +213,15 @@ uint8_t DHT11_Read_Byte(void) {
 }
 
 void DHT11_Read_Data(void) {
-    Set_Pin_Output(GPIOA, GPIO_PIN_5); // Đã đổi PA5
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 0); // Đã đổi PA5
+    Set_Pin_Output(GPIOA, GPIO_PIN_5);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 0);
     HAL_Delay(18);
 
     __disable_irq();
 
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 1); // Đã đổi PA5
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 1);
     delay_us(30);
-    Set_Pin_Input(GPIOA, GPIO_PIN_5); // Đã đổi PA5
+    Set_Pin_Input(GPIOA, GPIO_PIN_5);
 
     Presence = DHT11_Check_Response();
     if (Presence == 1) {
@@ -227,10 +242,10 @@ int main(void)
 
   MX_GPIO_Init();
   MX_ADC1_Init();
-  MX_TIM4_Init();
-  MX_TIM12_Init();
   MX_TIM1_Init();
   MX_TIM3_Init();
+  MX_TIM4_Init();
+  MX_TIM12_Init();
   MX_USART1_UART_Init();
 
   /* USER CODE BEGIN 2 */
@@ -244,84 +259,98 @@ int main(void)
   Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 0);
   Set_Servo_Angle(&htim4, TIM_CHANNEL_1, 0);
   HAL_Delay(1000);
-  /* USER CODE END 2 */
 
   uint32_t previousDHT11Tick = 0;
+  /* USER CODE END 2 */
 
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
   while (1)
   {
       // =========================================================
-      // 1. ĐỌC VÀ XỬ LÝ CẢM BIẾN MƯA (Kênh ADC1_IN1)
+      // 1. CẢM BIẾN MƯA (ADC1_IN1 - PA1) & CỬA KÍNH (PB6) & CẦN GẠT (PB15)
       // =========================================================
       rainADCValue = Read_ADC_Channel(ADC_CHANNEL_1);
 
+      // --- Logic Đóng/Mở Kính Xe ---
       if (rainADCValue < 3500) {
-            if (!isWindowClosed) {
-                Set_Servo_Angle(&htim4, TIM_CHANNEL_1, 180);
-                isWindowClosed = true;
-            }
-            wiperDelay = (rainADCValue > 2000) ? 800 : 300;
+          if (!isWindowClosed) {
+              Set_Servo_Angle(&htim4, TIM_CHANNEL_1, 180); // Đóng cửa kính
+              isWindowClosed = true;
+          }
+      } else if (rainADCValue > 4000) {
+          if (isWindowClosed) {
+              Set_Servo_Angle(&htim4, TIM_CHANNEL_1, 0);   // Trả về vị trí ban đầu
+              isWindowClosed = false;
+          }
+      }
 
-            uint32_t currentTick = HAL_GetTick();
-            if (currentTick - previousWiperTick >= wiperDelay) {
-                previousWiperTick = currentTick;
-                if (wiperDirection == false) {
-                    Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 180);
-                    wiperDirection = true;
-                } else {
-                    Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 0);
-                    wiperDirection = false;
-                }
-            }
-      } else {
-            Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 0);
-            wiperDirection = false;
-            if (isWindowClosed) {
-                Set_Servo_Angle(&htim4, TIM_CHANNEL_1, 0);
-                isWindowClosed = false;
-            }
+      // --- Logic Tốc Độ Cần Gạt Mưa ---
+      if (rainADCValue < 3500) {
+          // Phân cấp tốc độ gạt mưa dựa vào mức độ mưa
+          if (rainADCValue < 2000) {
+              wiperDelay = 300;   // Tốc độ 100% (Gạt rất nhanh)
+          } else if (rainADCValue < 2500) {
+              wiperDelay = 500;   // Tốc độ 75%
+          } else if (rainADCValue < 3000) {
+              wiperDelay = 800;   // Tốc độ 50%
+          } else {
+              wiperDelay = 1200;  // Tốc độ 25% (Gạt chậm)
+          }
+
+          // Thực hiện gạt qua lại theo chu kỳ wiperDelay
+          uint32_t currentTick = HAL_GetTick();
+          if (currentTick - previousWiperTick >= wiperDelay) {
+              previousWiperTick = currentTick;
+              if (!wiperDirection) {
+                  Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 180);
+                  wiperDirection = true;
+              } else {
+                  Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 0);
+                  wiperDirection = false;
+              }
+          }
+      } else { // Trời khô ráo (ADC >= 3500) -> Tắt gạt mưa
+          Set_Servo_Angle(&htim12, TIM_CHANNEL_2, 0);
+          wiperDirection = false;
       }
 
       // =========================================================
-      // 2. ĐỌC VÀ XỬ LÝ KHÍ MQ-135 (Kênh ADC1_IN0)
+      // 2. CẢM BIẾN KHÍ MQ-135 (ADC1_IN0 - PA0)
       // =========================================================
       mq135_adc_value = Read_ADC_Filtered(ADC_CHANNEL_0);
 
-      if (mq135_adc_value < THRESHOLD_ON) {
-          buzzer_state = 1;
-      } else if (mq135_adc_value > THRESHOLD_OFF) {
-          buzzer_state = 0;
+      // Thổi CO2 vào làm giá trị ADC giảm
+      if (mq135_adc_value < MQ135_DANGER_LEVEL) {
+          buzzer_state = 1; // Báo động (Khi ADC < 450)
+      } else if (mq135_adc_value > MQ135_SAFE_LEVEL) {
+          buzzer_state = 0; // An toàn (Khi ADC > 600)
       }
 
+      // Bật đèn cảnh báo nhấp nháy liên tục (Chu kỳ 200ms)
       if (buzzer_state == 1) {
-          uint32_t elapsed = HAL_GetTick() - buzzer_timer;
-          if (elapsed < 2000) {
-              HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET); // PB1 - Đèn báo khí[cite: 3]
-          } else if (elapsed < 3000) {
-              HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
-          } else {
+          if (HAL_GetTick() - buzzer_timer >= 200) {
               buzzer_timer = HAL_GetTick();
+              HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1); // Đảo trạng thái đèn PB1
           }
       } else {
-          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
-          buzzer_timer = HAL_GetTick();
+          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET); // Tắt đèn khi an toàn
       }
 
       // =========================================================
-      // 3. ĐỌC VÀ XỬ LÝ ÁNH SÁNG LDR (Kênh ADC1_IN4)
+      // 3. CẢM BIẾN ÁNH SÁNG LDR (ADC1_IN4 - PA4)
       // =========================================================
       ldr_adc_value = Read_ADC_Channel(ADC_CHANNEL_4);
 
       if (ldr_adc_value > LDR_THRESHOLD_ON) {
-          led_state = 1;
+          led_state = 1; // Vượt 3000 -> Tự động bật đèn cabin (PB2)
       } else if (ldr_adc_value < LDR_THRESHOLD_OFF) {
-          led_state = 0;
+          led_state = 0; // Dưới 2800 -> Tắt đèn cabin
       }
-      // PB2 - Đèn LDR sáng cabin (đã đổi chân)
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, led_state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
       // =========================================================
-      // 4. ĐỌC DHT11 & QUẠT ĐIỀU HÒA (1 giây / lần)
+      // 4. CẢM BIẾN NHIỆT ĐỘ DHT11 (PA5) & QUẠT DC (PB0)
       // =========================================================
       if (HAL_GetTick() - previousDHT11Tick >= 1000)
       {
@@ -332,26 +361,26 @@ int main(void)
                 Temperature = Temp_byte1;
                 Humidity    = Rh_byte1;
 
-                // In ra terminal để debug toàn bộ hệ thống
-                printf("T:%dC H:%d%% | Rain:%d | Gas:%ld | LDR:%ld\r\n",
-                        Temperature, Humidity, rainADCValue, mq135_adc_value, ldr_adc_value);
-
-                if (Temperature < 25) {
-                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 200);
-                } else if (Temperature <= 32) {
-                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 500);
+                if (Temperature > 30) {
+                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 1000); // Quay 100%
+                } else if (Temperature > 25) {
+                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 750);  // Quay 75%
+                } else if (Temperature > 20) {
+                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 500);  // Quay 50%
+                } else if (Temperature > 15) {
+                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 250);  // Quay 25%
                 } else {
-                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 1000);
+                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);    // Tắt hoàn toàn
                 }
-            } else {
-                printf("DHT11 Error | Rain:%d | Gas:%ld | LDR:%ld\r\n",
-                        rainADCValue, mq135_adc_value, ldr_adc_value);
             }
       }
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
   }
+  /* USER CODE END 3 */
 }
 
-/* KHU VỰC KHỞI TẠO BÊN DƯỚI GIỮ NGUYÊN HOÀN TOÀN NHƯ PROJECT CŨ CỦA BẠN */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -363,7 +392,12 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 168;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -371,12 +405,12 @@ void SystemClock_Config(void)
 
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
@@ -384,10 +418,10 @@ void SystemClock_Config(void)
 
 static void MX_ADC1_Init(void)
 {
-//  ADC_ChannelConfTypeDef sConfig = {0};
+  ADC_ChannelConfTypeDef sConfig = {0};
 
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
@@ -402,6 +436,14 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
+  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 static void MX_TIM1_Init(void)
@@ -410,7 +452,7 @@ static void MX_TIM1_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 16 - 1;
+  htim1.Init.Prescaler = 168 - 1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -440,7 +482,7 @@ static void MX_TIM3_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 16 - 1;
+  htim3.Init.Prescaler = 84 - 1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 1000 - 1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -482,7 +524,7 @@ static void MX_TIM4_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 16 - 1;
+  htim4.Init.Prescaler = 84 - 1;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 20000 - 1;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -523,7 +565,7 @@ static void MX_TIM12_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   htim12.Instance = TIM12;
-  htim12.Init.Prescaler = 16 - 1;
+  htim12.Init.Prescaler = 84 - 1;
   htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim12.Init.Period = 20000 - 1;
   htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -572,6 +614,7 @@ static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
@@ -584,9 +627,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2;
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
